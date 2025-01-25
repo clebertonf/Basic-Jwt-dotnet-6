@@ -1,8 +1,38 @@
+using System.Security.Claims;
+using System.Text;
+using JwtAspnet;
+using JwtAspnet.Extensions;
+using JwtAspnet.Models;
+using JwtAspnet.Services;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+// Authentication and Authorization
+builder.Services.AddAuthentication(x =>
+{
+    x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+}).AddJwtBearer(x =>
+{
+    x.TokenValidationParameters = new TokenValidationParameters
+    {
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(Configuration.PrivateKey)),
+        ValidateIssuer =false,
+        ValidateAudience = false,
+    };
+});
+builder.Services.AddAuthorization(x =>
+{
+    x.AddPolicy("admin", policy => policy.RequireRole("admin"));
+});
+
+builder.Services.AddTransient<TokenService>();
 
 var app = builder.Build();
 
@@ -12,30 +42,27 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+// Use Authentication Authorization
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseHttpsRedirection();
 
-var summaries = new[]
+app.MapGet("/", (TokenService service) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    var user = new User(1, "Cleber", "cleber@gmail.com", "image-teste", "teste123", ["student", "admin"]);
+    return service.CreateToken(user);
+});
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/restricted", (ClaimsPrincipal user) => new
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+    id = user.GetId(),
+    name = user.GetName(),
+    email = user.GetEmail(),
+    giveName = user.GivenName(),
+    image = user.GetImage(),
 })
-.WithName("GetWeatherForecast");
+    .RequireAuthorization();
+
+app.MapGet("/admin", () => "Access allowed!").RequireAuthorization("admin");
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
